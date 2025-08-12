@@ -1,21 +1,23 @@
-import asyncio
-import json
 import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import uvicorn
 import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-API_BASE_URL = os.environ.get("API_BASE_URL")
-MCP_SPEC_URL = f"{API_BASE_URL}/.well-known/mcp.json"
-MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:9000")  # Change if running elsewhere
-assert API_BASE_URL is not None, "Expected API_BASE_URL to be set - please check your env variables"
+API_BASE_URL = os.environ.get("API_BASE_URL","http://localhost:8000")
+OPENAPI_JSON = os.environ.get("OPENAPI_JSON",".well-known/openapi.json")
+OPENAPI_SPEC_URL = f"{API_BASE_URL}/{OPENAPI_JSON}"
+
+MCP_SERVER_SCHEME = os.environ.get("MCP_SERVER_SCHEME", "http")
+MCP_SERVER_PORT = int(os.environ.get("MCP_SERVER_PORT", "9000"))
+MCP_SERVER_URL = f"{MCP_SERVER_SCHEME}://localhost:{MCP_SERVER_PORT}" 
 
 SERVER_TITLE = os.environ.get("SERVER_TITLE", "My MCP Server")
 
@@ -81,8 +83,8 @@ def extract_tools_from_openapi(spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]
 async def lifespan(app: FastAPI):
     global openapi_spec, tools_cache
     try:
-        print(f"Loading OpenAPI spec from {MCP_SPEC_URL} ...")
-        resp = requests.get(MCP_SPEC_URL)
+        print(f"Loading OpenAPI spec from {OPENAPI_SPEC_URL} ...")
+        resp = requests.get(OPENAPI_SPEC_URL)
         resp.raise_for_status()
         openapi_spec = resp.json()
         tools_cache = extract_tools_from_openapi(openapi_spec)
@@ -94,7 +96,15 @@ async def lifespan(app: FastAPI):
     yield
     # No shutdown tasks
 
-app = FastAPI(title=f"{SERVER_TITLE} MCP Server", lifespan=lifespan)
+app = FastAPI(title=SERVER_TITLE, lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/.well-known/mcp.json")
 async def serve_mcp_manifest():
@@ -102,24 +112,37 @@ async def serve_mcp_manifest():
         raise HTTPException(status_code=500, detail="OpenAPI spec not loaded")
 
     manifest = {
-        "name": f"{SERVER_TITLE} API MCP",
+        "name": openapi_spec.get("info", {}).get("title", "Foo bar"),
         "version": openapi_spec.get("info", {}).get("version", "1.0"),
-        "type": "sse",
-        "endpoints": [
-            {"url": f"{MCP_SERVER_URL}/sse"}
-        ],
+        "description": openapi_spec.get("info", {}).get("description", ""),
+        "type": "rest",
+        "servers": openapi_spec.get("servers", []),
+        "security": openapi_spec.get("security", []),
+        "securitySchemes": openapi_spec.get("components", {}).get("securitySchemes", {}),
         "tools": [
             {
                 "name": t["name"],
                 "description": t["description"],
+                "path": t["endpoint"],    
+                "method": t["method"],     
                 "parameters": t["parameters_schema"],
+                "security": get_operation_security(openapi_spec, t["endpoint"], t["method"]),
             } for t in tools_cache.values()
         ],
     }
     return JSONResponse(manifest)
 
-@app.post("/tools/{tool_name}")
-async def call_tool(tool_name: str, req: ToolRequest):
+def get_operation_security(spec: Dict[str, Any], path: str, method: str):
+    """
+    Extract the security requirement for a given path and method from the OpenAPI spec.
+    Return list or empty list if none.
+    """
+    path_item = spec.get("paths", {}).get(path, {})
+    operation = path_item.get(method.lower(), {})
+    return operation.get("security", [])
+
+@app.api_route("/tools/{tool_name}", methods=["GET", "POST"])
+async def call_tool(tool_name: str, req: ToolRequest, request: Request):
     if not openapi_spec:
         raise HTTPException(status_code=500, detail="OpenAPI spec not loaded")
 
@@ -139,11 +162,23 @@ async def call_tool(tool_name: str, req: ToolRequest):
 
     url = API_BASE_URL.rstrip("/") + endpoint
 
+    # Extract relevant auth headers from incoming request
+    incoming_headers = {}
+    # Forward Authorization header if present
+    auth_header = request.headers.get("authorization")
+    if auth_header:
+        incoming_headers["Authorization"] = auth_header
+
+    # Forward Cookie header if present
+    cookie_header = request.headers.get("cookie")
+    if cookie_header:
+        incoming_headers["Cookie"] = cookie_header
+
     try:
         if tool["method"] == "GET":
-            resp = requests.get(url, params=params)
+            resp = requests.get(url, params=params, headers=incoming_headers)
         elif tool["method"] == "POST":
-            resp = requests.post(url, json=params)
+            resp = requests.post(url, json=params, headers=incoming_headers)
         else:
             raise HTTPException(status_code=405, detail="Unsupported method")
 
@@ -151,16 +186,8 @@ async def call_tool(tool_name: str, req: ToolRequest):
         return JSONResponse(content=resp.json())
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
+    
 
-@app.get("/sse")
-async def sse_endpoint():
-    async def event_generator():
-        while True:
-            data = {"type": "ping", "payload": "keep-alive"}
-            yield f"data: {json.dumps(data)}\n\n"
-            await asyncio.sleep(5)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
-    uvicorn.run("mcp_auto_server:app", host="0.0.0.0", port=9000, log_level="info")
+    uvicorn.run("mcp_auto_server:app", host="0.0.0.0", port=int(os.environ.get("MCP_SERVER_PORT", "9000")), log_level="info")
