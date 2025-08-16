@@ -10,8 +10,12 @@ load_dotenv()
 # Configuration
 MCP_SERVER_SCHEME = os.environ.get("MCP_SERVER_SCHEME", "http")
 MCP_SERVER_HOST = os.environ.get("MCP_SERVER_HOST", "localhost")
-MCP_SERVER_PORT = int(os.environ.get("MCP_SERVER_PORT", "9000"))
-MCP_JSON_URL = f"{MCP_SERVER_SCHEME}://{MCP_SERVER_HOST}:{MCP_SERVER_PORT}/.well-known/mcp.json"
+MCP_SERVER_PORT = os.environ.get("MCP_SERVER_PORT", "9000")
+if MCP_SERVER_PORT is not None:
+    port_string = f":{MCP_SERVER_PORT}"
+else:
+    port_string = ""
+MCP_JSON_URL = f"{MCP_SERVER_SCHEME}://{MCP_SERVER_HOST}{port_string}/.well-known/mcp.json"
 
 # Dummy payload for POST testing
 DUMMY_PAYLOAD = {"test": True}
