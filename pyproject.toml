@@ -1,0 +1,18 @@
+[project]
+name = "my-project"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "requests",
+    "pydantic",
+    "python-dotenv",
+    "sseclient",
+]
+
+[tool.uv]
+
