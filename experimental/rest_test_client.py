@@ -21,12 +21,12 @@ MCP_JSON_URL = f"{MCP_SERVER_SCHEME}://{MCP_SERVER_HOST}{port_string}/.well-know
 DUMMY_PAYLOAD = {"test": True}
 
 API_TOKEN = os.environ.get("API_TOKEN", "abc123")
-COOKIE_SESSION_ID = os.environ.get("COOKIE_SESSION_ID", "xyz")
+API_TOKEN_PREFIX = os.environ.get("API_TOKEN_PREFIX", "Bearer")
 
 # Example auth headers — replace with your real token or cookie values for testing
-AUTH_HEADER = {"Authorization": f"Token {API_TOKEN}"}
-COOKIE_HEADER = {"Cookie": f"sessionid={COOKIE_SESSION_ID}"}
-AUTH_HEADERS = {**AUTH_HEADER, **COOKIE_HEADER}
+AUTH_HEADER = {"Authorization": f"{API_TOKEN_PREFIX} {API_TOKEN}".strip()} 
+
+print(AUTH_HEADER)
 
 # Dummy parameter values for replacement
 DUMMY_PARAMS = {
@@ -105,9 +105,9 @@ def test_openapi(openapi_url):
         for method in methods.keys():
             url = urljoin(base_url + "/", replaced_path.lstrip("/"))
             if method.lower() == "get":
-                test_get(url, headers=AUTH_HEADERS)
+                test_get(url, headers=AUTH_HEADER)
             elif method.lower() == "post":
-                test_post(url, headers=AUTH_HEADERS)
+                test_post(url, headers=AUTH_HEADER)
             else:
                 print(f"Skipping {method.upper()} {url} (not implemented)")
 
@@ -125,9 +125,9 @@ def main():
             url = urljoin(base_url + "/", replaced_path.lstrip("/"))
             method = tool.get("method", "GET").upper()
             if method == "GET":
-                test_get(url, headers=AUTH_HEADERS)
+                test_get(url, headers=AUTH_HEADER)
             elif method == "POST":
-                test_post(url, headers=AUTH_HEADERS)
+                test_post(url, headers=AUTH_HEADER)
             else:
                 print(f"Skipping {method} {url} (unsupported method)")
     elif servers:

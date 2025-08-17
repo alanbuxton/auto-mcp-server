@@ -12,6 +12,7 @@ dependencies = [
     "pydantic",
     "python-dotenv",
     "sseclient",
+    "mcp",
 ]
 
 [tool.uv]

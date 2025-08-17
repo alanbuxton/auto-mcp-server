@@ -8,8 +8,12 @@ import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+from util.shared import extract_tools_from_openapi
 
 load_dotenv()
+
+logger = logging.getLogger("uvicorn.error")
 
 API_BASE_URL = os.environ.get("API_BASE_URL","http://localhost:8000")
 OPENAPI_JSON = os.environ.get("OPENAPI_JSON",".well-known/openapi.json")
@@ -27,70 +31,18 @@ tools_cache: Dict[str, Dict[str, Any]] = {}
 class ToolRequest(BaseModel):
     params: Optional[Dict[str, Any]] = {}
 
-def extract_tools_from_openapi(spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """
-    Scan the OpenAPI spec paths and generate MCP tool info for GET and POST endpoints.
-    """
-    tools = {}
-    paths = spec.get("paths", {})
-    for path, methods in paths.items():
-        for method, operation in methods.items():
-            method_upper = method.upper()
-            method_lower = method.lower()
-            if method_upper not in ("GET", "POST"):
-                continue  # Only GET and POST for now
-
-            name = operation.get("operationId") or f"{method_lower}_{path.strip('/').replace('/', '_').replace('{', '').replace('}', '')}"
-            name = name.replace(" ", "_")
-
-            parameters = operation.get("parameters", [])
-            props = {}
-            required_params = []
-            for param in parameters:
-                pname = param.get("name")
-                pschema = param.get("schema", {})
-                ptype = pschema.get("type", "string")
-                props[pname] = {"type": ptype}
-                if param.get("required", False):
-                    required_params.append(pname)
-
-            # Add POST requestBody schema props if JSON object
-            if method_upper == "POST" and "requestBody" in operation:
-                content = operation["requestBody"].get("content", {})
-                json_schema = content.get("application/json", {}).get("schema", {})
-                if json_schema.get("type") == "object":
-                    body_props = json_schema.get("properties", {})
-                    for pname, pschema in body_props.items():
-                        if pname not in props:
-                            props[pname] = {"type": pschema.get("type", "string")}
-                    required_params += json_schema.get("required", [])
-
-            tool_info = {
-                "name": name,
-                "description": operation.get("description", ""),
-                "endpoint": path,
-                "method": method_upper,
-                "parameters_schema": {
-                    "type": "object",
-                    "properties": props,
-                    "required": required_params,
-                },
-            }
-            tools[name] = tool_info
-    return tools
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global openapi_spec, tools_cache
     try:
-        print(f"Loading OpenAPI spec from {OPENAPI_SPEC_URL} ...")
+        logger.info(f"Loading OpenAPI spec from {OPENAPI_SPEC_URL} ...")
         resp = requests.get(OPENAPI_SPEC_URL)
         resp.raise_for_status()
         openapi_spec = resp.json()
         tools_cache = extract_tools_from_openapi(openapi_spec)
-        print(f"Loaded OpenAPI spec and cached {len(tools_cache)} tools")
+        logger.info(f"Loaded OpenAPI spec and cached {len(tools_cache)} tools")
     except Exception as e:
-        print(f"Failed to load OpenAPI spec: {e}")
+        logger.info(f"Failed to load OpenAPI spec: {e}")
         openapi_spec = {}
         tools_cache = {}
     yield
@@ -190,4 +142,5 @@ async def call_tool(tool_name: str, req: ToolRequest, request: Request):
 
 
 if __name__ == "__main__":
-    uvicorn.run("mcp_auto_server:app", host="0.0.0.0", port=int(os.environ.get("MCP_SERVER_PORT", "9000")), log_level="info")
+    port = int(os.environ.get("MCP_SERVER_PORT", "9011"))
+    uvicorn.run("rest_mcp_server:app", host="0.0.0.0", port=port, log_level="info")
