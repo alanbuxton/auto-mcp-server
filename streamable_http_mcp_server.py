@@ -129,12 +129,8 @@ if __name__ == "__main__":
     load_openapi_spec()
     register_api_tools()
     
-    host = os.getenv("HOST", "127.0.0.1")
-    port = int(os.getenv("PORT", "8001"))
-    
     logger.info(f"Starting MCP HTTP server")
     logger.info(f"Registered {len(tools_cache)} tools from OpenAPI spec")
-    
-    # Use streamable-http transport (the correct transport name)
+
     mcp.run(transport="streamable-http")
-    logger.info(f"Connect to: http://{host}:{port}/mcp")
+
