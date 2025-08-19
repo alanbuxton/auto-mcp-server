@@ -23,6 +23,7 @@ API_TOKEN_PREFIX = os.getenv("API_TOKEN_PREFIX", "")
 AUTH_HEADER_NAME = os.getenv("AUTH_HEADER_NAME", "Authorization")
 AUTH_HEADER = {AUTH_HEADER_NAME: f"{API_TOKEN_PREFIX} {API_TOKEN}".strip()}
 SERVER_TITLE = os.getenv("SERVER_TITLE", "My MCP Server")
+MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8000"))
 
 # --- Global caches ---
 openapi_spec: Dict[str, Any] = {}
@@ -47,7 +48,7 @@ def load_openapi_spec():
         raw_openapi_spec = ""
 
 # --- Create FastMCP server ---
-mcp = FastMCP(SERVER_TITLE)
+mcp = FastMCP(SERVER_TITLE,port=MCP_SERVER_PORT)
 
 # --- Register Resources ---
 @mcp.resource(uri=OPENAPI_SPEC_URL)
@@ -134,16 +135,6 @@ if __name__ == "__main__":
     logger.info(f"Starting MCP HTTP server")
     logger.info(f"Registered {len(tools_cache)} tools from OpenAPI spec")
     
-    # FastMCP with streamable-http transport
-    try:
-        # Use streamable-http transport (the correct transport name)
-        mcp.run(transport="streamable-http", host=host, port=port)
-        logger.info(f"Connect to: http://{host}:{port}/mcp")
-    except TypeError as e:
-        logger.error(f"Error with transport parameters: {e}")
-        # Fallback: use environment variables
-        os.environ["FASTMCP_HOST"] = host
-        os.environ["FASTMCP_PORT"] = str(port)
-        logger.info(f"Set environment: FASTMCP_HOST={host}, FASTMCP_PORT={port}")
-        logger.info(f"Connect to: http://{host}:{port}/mcp")
-        mcp.run(transport="streamable-http")
+    # Use streamable-http transport (the correct transport name)
+    mcp.run(transport="streamable-http")
+    logger.info(f"Connect to: http://{host}:{port}/mcp")
