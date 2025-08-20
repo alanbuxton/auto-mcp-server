@@ -1,28 +1,31 @@
 # auto-mcp-server
 
-So, you've got a web app with a REST API. 
+You've got a web app with a REST API. Maybe it's a Django app and you've generated an OpenAPI spec using `drf-spectacular`. 
 
-Maybe it's a Django app and you've generated an OpenAPI schema using `drf-spectacular`. 
+Now you want to let an LLM talk to it. You need an MCP server to handle the translation between the two.
 
-Now you want to let an LLM talk to it.
+```mermaid
+graph LR
+    A[🤖 LLM] <--> B[🔌 MCP Server] <--> C[🌐 API Server]
+```
 
-If so then, welcome, you've come to the right place. 
+`auto-mcp-server` is a lightweight MCP server that makes your Web App accessible by LLMs. It was originally made for https://syracuse.1145.am but can be used for any server that has an OpenAPI spec.
 
-`auto-mcp-server` is an MCP server that auto-generates MCP tools based on an OpenAPI and can be called directly from the likes of Claude Desktop.
+It comes in two flavours:
+1. A local MCP server that uses STDIO and can work with e.g. the free tier of Claude Desktop
+2. A remote MCP server that uses Streamable HTTP and can be deployed on any web host to your liking.
 
-It was originally made for https://syracuse.1145.am but can be used for any server that has an OpenAPI spec.
+## Using this repo
 
-See `.env.sample` for config options.
+1. Clone it
+2. Ensure you have `uv` installed (see https://docs.astral.sh/uv/getting-started/installation/)
+3. Copy `.env.sample` to `.env` and configure according to your settings
+4. If you're running a Remote MCP Server then start it up
+5. Test with MCP Inspector `npx @modelcontextprotocol/inspector` (see https://modelcontextprotocol.io/legacy/tools/inspector)
 
-## stdio_mcp_server
+## Local MCP Server (STDIO)
 
-Claude Desktop expects MCP servers to run locally. Here's how you configure this
-
-Pre-requisites:
-1. `uv` is installed (see https://docs.astral.sh/uv/getting-started/installation/)
-2. The backend API server is running with an OpenAPI json schema available. Configure where to find this with a combination of API_BASE_URL and OPENAPI_JSON
-
-Claude configuration, assuming you only have one MCP server defined:
+With a local MCP server you don't have to start it, you just have to configure your client app (e.g. Claude Desktop) to know where to find the code. Here is a sample `claude_desktop_config.json`
 
 ```
 {
@@ -40,7 +43,20 @@ Claude configuration, assuming you only have one MCP server defined:
 }
 ```
 
+Connection info for MCP Inspector:
+- **Transport Type**: STDIO
+- **Command**: `/path/to/uv`
+- **Arguments**: `--directory /path/to/auto-mcp-server run stdio_mcp_server.py`
 
-## experimental files
 
-This is intended as a remote MCP server but is currently in progress until it can be validated properly.
+
+## Remote MCP Server (Streamable HTTP)
+
+Start it up with:
+
+`uv run streamable_http_mcp_server.py`
+
+Connection info for MCP Inspector:
+- **Transport Type**: Streamable HTTP
+- **URL**: host:port/mcp, e.g. `http://127.0.0.1/mcp`
+

@@ -6,32 +6,9 @@ from mcp.types import Tool, TextContent, Resource, Prompt
 from typing import Dict, Any
 import json
 import os
-from dotenv import load_dotenv
-import logging
 from util.shared import extract_tools_from_openapi
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-load_dotenv()
-
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-OPENAPI_JSON = os.environ.get("OPENAPI_JSON", ".well-known/openapi.json")
-OPENAPI_SPEC_URL = f"{API_BASE_URL}/{OPENAPI_JSON}"
-SERVER_TITLE = os.environ.get("SERVER_TITLE", "My MCP Server")
-
-
-# Authentication configuration
-API_TOKEN = os.environ.get("API_TOKEN")  
-API_TOKEN_PREFIX = os.environ.get("API_TOKEN_PREFIX","")
-AUTH_HEADER_NAME = os.environ.get("AUTH_HEADER_NAME", "Authorization")  # Header name
-AUTH_HEADER = {AUTH_HEADER_NAME: f"{API_TOKEN_PREFIX} {API_TOKEN}".strip()}
-
-# Global cache
-openapi_spec: Dict[str, Any] = {}
-tools_cache: Dict[str, Dict[str, Any]] = {}
-raw_openapi_spec: str = ""
+from util.log import logger
+from util.vars import *
 
 
 async def load_openapi_spec():

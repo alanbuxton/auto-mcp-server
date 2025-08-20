@@ -1,34 +1,13 @@
 # file: http_mcp_server_inspector_friendly.py
 import os
 import json
-import logging
 import requests
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
-from mcp.types import Tool, TextContent, Resource
-from typing import Dict, Any
+from mcp.types import TextContent
 from util.shared import extract_tools_from_openapi
+from util.log import logger
+from util.vars import *
 
-# --- Logging ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# --- Environment ---
-load_dotenv()
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-OPENAPI_JSON = os.getenv("OPENAPI_JSON", ".well-known/openapi.json")
-OPENAPI_SPEC_URL = f"{API_BASE_URL}/{OPENAPI_JSON}"
-API_TOKEN = os.getenv("API_TOKEN", "")
-API_TOKEN_PREFIX = os.getenv("API_TOKEN_PREFIX", "")
-AUTH_HEADER_NAME = os.getenv("AUTH_HEADER_NAME", "Authorization")
-AUTH_HEADER = {AUTH_HEADER_NAME: f"{API_TOKEN_PREFIX} {API_TOKEN}".strip()}
-SERVER_TITLE = os.getenv("SERVER_TITLE", "My MCP Server")
-MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8000"))
-
-# --- Global caches ---
-openapi_spec: Dict[str, Any] = {}
-tools_cache: Dict[str, Dict[str, Any]] = {}
-raw_openapi_spec: str = ""
 
 # --- Load OpenAPI Spec ---
 def load_openapi_spec():
