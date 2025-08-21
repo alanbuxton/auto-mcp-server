@@ -7,7 +7,8 @@ from mcp.types import TextContent
 from util.shared import extract_tools_from_openapi
 from util.log import logger
 from util.vars import *
-
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 # --- Load OpenAPI Spec ---
 def load_openapi_spec():
@@ -36,6 +37,57 @@ def get_openapi_spec() -> str:
     if not raw_openapi_spec:
         load_openapi_spec()
     return raw_openapi_spec
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request):
+    return JSONResponse({"status": "healthy"})
+
+@mcp.custom_route("/.well-known/mcp.json", methods=["GET"])
+async def serve_mcp_manifest(request):
+    """Serve the MCP manifest at /.well-known/mcp.json for web clients"""
+    if not openapi_spec:
+        logger.error("OpenAPI spec not loaded when serving manifest")
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": "OpenAPI spec not loaded"}, status_code=500)
+
+    try:
+        manifest = {
+            "name": openapi_spec.get("info", {}).get("title", SERVER_TITLE),
+            "version": openapi_spec.get("info", {}).get("version", "1.0"),
+            "description": openapi_spec.get("info", {}).get("description", ""),
+            "type": "streamable-http",
+            "servers": openapi_spec.get("servers", []),
+            "security": openapi_spec.get("security", []),
+            "securitySchemes": openapi_spec.get("components", {}).get("securitySchemes", {}),
+            "resources": [
+                {
+                    "uri": OPENAPI_SPEC_URL,
+                    "name": "OpenAPI Specification",
+                    "description": "The OpenAPI specification used to generate this MCP server's tools",
+                    "mimeType": "application/json"
+                }
+            ],
+            "tools": [
+                {
+                    "name": tool_name,
+                    "description": tool_info["description"],
+                    "path": tool_info["endpoint"],    
+                    "method": tool_info["method"],     
+                    "parameters": tool_info["inputSchema"],
+                    "security": tool_info.get("security", openapi_spec.get("security", [])),
+                    "responses": tool_info.get("responses", {}),
+                } for tool_name, tool_info in tools_cache.items()
+            ],
+        }
+        
+        logger.info(f"Serving MCP manifest with {len(manifest['tools'])} tools")
+        from starlette.responses import JSONResponse
+        return JSONResponse(manifest)
+        
+    except Exception as e:
+        logger.error(f"Error generating MCP manifest: {e}")
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": f"Error generating manifest: {str(e)}"}, status_code=500)
 
 # --- Register Tools (dynamically from OpenAPI spec) ---
 def register_api_tools():
