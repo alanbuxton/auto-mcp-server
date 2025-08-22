@@ -1,4 +1,22 @@
 from typing import Dict, Any
+import requests
+from util.vars import OPENAPI_SPEC_URL, AUTH_HEADER
+from util.log import logger
+from abc import ABC
+
+class OpenAPISpec(ABC):
+    def __init__(self):
+        try:
+            logger.info(f"Loading OpenAPI spec from {OPENAPI_SPEC_URL}...")
+            resp = requests.get(OPENAPI_SPEC_URL, headers=AUTH_HEADER, timeout=10)
+            resp.raise_for_status()
+            self.raw_openapi_spec = resp.text
+            self.openapi_spec = resp.json()
+            self.tools_cache = extract_tools_from_openapi(self.openapi_spec)
+            logger.info(f"Loaded OpenAPI spec and cached {len(self.tools_cache)} tools")
+        except Exception as e:
+            logger.error(f"Failed to load OpenAPI spec: {e}")
+            raise
 
 
 def resolve_schema_ref(spec: Dict[str, Any], ref: str) -> Dict[str, Any]:

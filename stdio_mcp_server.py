@@ -3,43 +3,23 @@ import requests
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent, Resource, Prompt
-from typing import Dict, Any
 import json
-import os
-from util.shared import extract_tools_from_openapi
+from util.shared import OpenAPISpec
 from util.log import logger
-from util.vars import *
+from util.vars import MCP_SERVER_NAME, OPENAPI_SPEC_URL, AUTH_HEADER, API_BASE_URL
 
-
-async def load_openapi_spec():
-    """Load OpenAPI spec at startup"""
-    global openapi_spec, tools_cache, raw_openapi_spec
-    try:
-        logger.info(f"Loading OpenAPI spec from {OPENAPI_SPEC_URL}...")
- 
-        resp = requests.get(OPENAPI_SPEC_URL, headers=AUTH_HEADER, timeout=10)
-        resp.raise_for_status()
-        raw_openapi_spec = resp.text
-        openapi_spec = resp.json()
-        tools_cache = extract_tools_from_openapi(openapi_spec)
-        logger.info(f"Loaded OpenAPI spec and cached {len(tools_cache)} tools")
-    except Exception as e:
-        logger.error(f"Failed to load OpenAPI spec: {e}")
-        openapi_spec = {}
-        tools_cache = {}
-        raw_openapi_spec = ""
 
 # Create MCP server
-server = Server(SERVER_TITLE)
+server = Server(MCP_SERVER_NAME)
+
+openapi_spec = OpenAPISpec()
+logger.info("Loaded openapi spec")
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     """Return list of available tools"""
-    if not tools_cache:
-        await load_openapi_spec()
-
     tools = []
-    for tool_info in tools_cache.values():
+    for tool_info in openapi_spec.tools_cache.values():
         tool_name = tool_info["name"]
         logger.info(tool_name)
         tools.append(Tool(
@@ -77,21 +57,7 @@ async def read_resource(uri: str) -> str:
     logger.info(f"Reading resource: {uri}")
     
     if str(uri) == OPENAPI_SPEC_URL:
-        if not raw_openapi_spec:
-            await load_openapi_spec()
-        return raw_openapi_spec
-        # try:
-        #     # Fetch the OpenAPI spec
-        #     resp = requests.get(OPENAPI_SPEC_URL, headers=AUTH_HEADER, timeout=10)
-        #     resp.raise_for_status()
-            
-        #     # Return the raw JSON text
-        #     return resp.text
-            
-        # except requests.exceptions.RequestException as e:
-        #     error_msg = f"Failed to fetch OpenAPI spec: {str(e)}"
-        #     logger.error(error_msg)
-        #     raise RuntimeError(error_msg)
+        return openapi_spec.raw_openapi_spec
     else:
         error_msg = f"Unknown resource URI: {uri}"
         logger.error(error_msg)
@@ -102,12 +68,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Execute a tool call"""
     logger.info(f"Calling tool '{name}' with arguments: {arguments}")
     
-    if not tools_cache:
-        await load_openapi_spec()
-    
-    tool = tools_cache.get(name)
+    tool = openapi_spec.tools_cache.get(name)
     if not tool:
-        error_msg = f"Tool '{name}' not found. Available tools: {list(tools_cache.keys())}"
+        error_msg = f"Tool '{name}' not found. Available tools: {list(openapi_spec.tools_cache.keys())}"
         logger.error(error_msg)
         return [TextContent(type="text", text=error_msg)]
 
@@ -164,16 +127,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 async def main():
     """Main entry point"""
-    logger.info("Starting MCP server...")
-    
-    # Load spec at startup
-    await load_openapi_spec()
     
     logger.info("MCP server ready and waiting for connections...")
     
     # Run the server
     async with stdio_server() as (read_stream, write_stream):
-        logger.info("Connected to Claude Desktop via stdio")
+        logger.info("Connected to client via stdio")
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 if __name__ == "__main__":
