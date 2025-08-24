@@ -9,7 +9,7 @@ graph LR
     A[🤖 LLM] <--> B[🔌 MCP Server] <--> C[🌐 API Server]
 ```
 
-`auto-mcp-server` is a lightweight MCP server that makes your Web App accessible by LLMs. It was originally made for https://syracuse.1145.am but could be used for any server that has an OpenAPI spec. Not sure how good it would be for heavy production use, but it's certainly good enough for getting started.
+`auto-mcp-server` is a lightweight MCP server that makes your Web App accessible by LLMs. It was originally made for https://syracuse.1145.am (code: https://github.com/alanbuxton/syracuse-neo) but could be used for any server that has an OpenAPI spec. Not sure how good it would be for heavy production use, but it's certainly good enough for getting started.
 
 It comes in two flavours:
 1. A local MCP server that uses STDIO and can work with e.g. the free tier of Claude Desktop
