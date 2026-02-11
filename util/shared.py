@@ -1,6 +1,6 @@
 from typing import Dict, Any
 import requests
-from util.vars import OPENAPI_SPEC_URL, AUTH_HEADER
+from util.vars import OPENAPI_SPEC_URL, AUTH_HEADER, ALLOWED_TOOLS
 from util.log import logger
 from abc import ABC
 
@@ -119,6 +119,10 @@ def extract_tools_from_openapi(spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]
             # Generate tool name
             name = operation.get("operationId") or f"{method_lower}_{path.strip('/').replace('/', '_').replace('{', '').replace('}', '')}"
             name = name.replace(" ", "_")
+
+            if ALLOWED_TOOLS and name not in ALLOWED_TOOLS:
+                logger.info(f"Ignoring {name} - not in {ALLOWED_TOOLS}")
+                continue
 
             # Process parameters
             parameters = operation.get("parameters", [])

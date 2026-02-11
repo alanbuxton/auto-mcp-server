@@ -14,3 +14,4 @@ AUTH_HEADER = {AUTH_HEADER_NAME: f"{API_TOKEN_PREFIX} {MCP_SERVER_API_TOKEN}".st
 
 MCP_SERVER_NAME = os.getenv("SERVER_TITLE", "My MCP Server")
 HTTP_MCP_SERVER_PORT = int(os.getenv("HTTP_MCP_SERVER_PORT", "9000"))
+ALLOWED_TOOLS = [x.strip() for x in os.getenv("ALLOWED_TOOLS","").split(",") if x.strip()]
