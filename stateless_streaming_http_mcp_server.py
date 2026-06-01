@@ -73,13 +73,15 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
             }
         security_requirements.append({"apiToken": []})
     
-    # Add cookie auth if you're handling cookies
-    security_schemes["cookieAuth"] = {
-        "type": "apiKey",
-        "in": "cookie",
-        "name": "session",
-        "description": "Cookie-based authentication"
-    }
+    # Advertise cookie auth only if the OpenAPI spec declares a cookie-based
+    # scheme; the cookie name is taken from the spec rather than hard-coded.
+    if openapi_spec.cookie_auth:
+        security_schemes["cookieAuth"] = {
+            "type": "apiKey",
+            "in": "cookie",
+            "name": openapi_spec.cookie_auth.get("name", "session"),
+            "description": "Cookie-based authentication"
+        }
     
     # Build enhanced tools with response schemas
     enhanced_tools = []
@@ -171,12 +173,22 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
         }
         discovery_doc["security"] = security_requirements
     
+    # Auth is required to connect only when there is no anonymous entry point —
+    # i.e. every tool requires auth. If any tool is keyless , clients must be able to connect
+    # anonymously to reach it, so strict clients honoring required:true would
+    # otherwise refuse to connect without a key. Per-tool security is still
+    # advertised above for the tools that need it.
+    tools = openapi_spec.tools_cache.values()
+    auth_required = bool(tools) and all(
+        t.get("requires_auth", False) for t in tools
+    )
+
     # Add transport information
     discovery_doc["transport"] = {
         "type": "http",
         "baseUrl": f"{API_BASE_URL}/mcp",
         "authentication": {
-            "required": bool(security_requirements),
+            "required": auth_required,
             "methods": list(security_schemes.keys()) if security_schemes else []
         }
     }

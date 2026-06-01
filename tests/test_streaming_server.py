@@ -54,9 +54,11 @@ class TestPrepareAuthHeaders:
 # --------------------------------------------------------------------------- #
 # generate_mcp_discovery_document
 # --------------------------------------------------------------------------- #
-def _spec_with_tools(tools_cache, version="9.9.9"):
+def _spec_with_tools(tools_cache, version="9.9.9", cookie_auth=None):
     """A lightweight stand-in for OpenAPISpec carrying a tools_cache."""
-    return types.SimpleNamespace(tools_cache=tools_cache, version=version)
+    return types.SimpleNamespace(
+        tools_cache=tools_cache, version=version, cookie_auth=cookie_auth
+    )
 
 
 @pytest.fixture
@@ -83,6 +85,23 @@ class TestGenerateDiscoveryDocument:
         assert scheme["in"] == "header"
         assert scheme["name"] == "Authorization"
 
+    def test_cookie_auth_advertised_when_spec_declares_it(self, base_env, monkeypatch):
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        cookie_auth = {"type": "apiKey", "in": "cookie", "name": "sessionid"}
+        doc = server.generate_mcp_discovery_document(
+            _spec_with_tools({}, cookie_auth=cookie_auth)
+        )
+        scheme = doc["components"]["securitySchemes"]["cookieAuth"]
+        assert scheme["in"] == "cookie"
+        assert scheme["name"] == "sessionid"
+        assert "cookieAuth" in doc["transport"]["authentication"]["methods"]
+
+    def test_cookie_auth_omitted_when_spec_has_none(self, base_env, monkeypatch):
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        doc = server.generate_mcp_discovery_document(_spec_with_tools({}))
+        assert "cookieAuth" not in doc["components"]["securitySchemes"]
+        assert "cookieAuth" not in doc["transport"]["authentication"]["methods"]
+
     def test_server_metadata_and_transport(self, base_env, monkeypatch):
         monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
         doc = server.generate_mcp_discovery_document(_spec_with_tools({}, version="2.5.0"))
@@ -90,7 +109,7 @@ class TestGenerateDiscoveryDocument:
         assert doc["server"]["version"] == "2.5.0"
         assert doc["mcpVersion"] == server.types.LATEST_PROTOCOL_VERSION
         assert doc["transport"]["baseUrl"] == "http://api.test/mcp"
-        assert doc["transport"]["authentication"]["required"] is True
+        assert doc["transport"]["authentication"]["required"] is False
 
     def test_auth_tool_advertises_security(self, base_env, monkeypatch):
         monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
@@ -106,6 +125,26 @@ class TestGenerateDiscoveryDocument:
         tool = doc["tools"][0]
         assert tool["_meta"]["requiresAuth"] is True
         assert tool["security"] == [{"apiToken": []}]
+
+    def test_transport_auth_required_when_all_tools_need_auth(self, base_env, monkeypatch):
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        tools_cache = {
+            "a": {"name": "a", "description": "", "inputSchema": {}, "requires_auth": True},
+            "b": {"name": "b", "description": "", "inputSchema": {}, "requires_auth": True},
+        }
+        doc = server.generate_mcp_discovery_document(_spec_with_tools(tools_cache))
+        assert doc["transport"]["authentication"]["required"] is True
+
+    def test_transport_auth_not_required_when_a_tool_is_keyless(self, base_env, monkeypatch):
+        # e.g. a register_and_get_key bootstrap tool — clients must be able to
+        # connect anonymously to reach it.
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        tools_cache = {
+            "register_and_get_key": {"name": "register_and_get_key", "description": "", "inputSchema": {}, "requires_auth": False},
+            "secure": {"name": "secure", "description": "", "inputSchema": {}, "requires_auth": True},
+        }
+        doc = server.generate_mcp_discovery_document(_spec_with_tools(tools_cache))
+        assert doc["transport"]["authentication"]["required"] is False
 
     def test_public_tool_omits_security(self, base_env, monkeypatch):
         monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")

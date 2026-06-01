@@ -13,11 +13,25 @@ class OpenAPISpec(ABC):
             self.raw_openapi_spec = resp.text
             self.openapi_spec = resp.json()
             self.version = self.openapi_spec.get("info", {}).get("version", "0.0.0")
+            self.cookie_auth = extract_cookie_auth_scheme(self.openapi_spec)
             self.tools_cache = extract_tools_from_openapi(self.openapi_spec)
             logger.info(f"Loaded OpenAPI spec and cached {len(self.tools_cache)} tools")
         except Exception as e:
             logger.error(f"Failed to load OpenAPI spec: {e}")
             raise
+
+
+def extract_cookie_auth_scheme(spec: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Return the first cookie-based security scheme declared by the OpenAPI
+    spec (``type: apiKey``, ``in: cookie``), or ``None`` if the API declares no
+    cookie auth. Lets the discovery doc advertise cookie auth only when the
+    underlying API actually supports it, using the cookie name from the spec.
+    """
+    schemes = spec.get("components", {}).get("securitySchemes", {})
+    for scheme in schemes.values():
+        if scheme.get("type") == "apiKey" and scheme.get("in") == "cookie":
+            return scheme
+    return None
 
 
 def resolve_schema_ref(spec: Dict[str, Any], ref: str) -> Dict[str, Any]:
