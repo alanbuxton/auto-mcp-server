@@ -103,11 +103,28 @@ def extract_response_info(spec: Dict[str, Any], operation: Dict[str, Any]) -> Di
     return response_info
 
 
+def operation_requires_auth(spec: Dict[str, Any], operation: Dict[str, Any]) -> bool:
+    """Determine whether an operation requires authentication.
+
+    Per the OpenAPI spec, an operation-level ``security`` field overrides the
+    top-level ``security`` field. An empty list (``security: []``) explicitly
+    disables authentication for that scope. A non-empty list means at least one
+    security requirement must be satisfied.
+    """
+    op_security = operation.get("security")
+    if op_security is not None:
+        # Operation-level security overrides the global default.
+        return len(op_security) > 0
+
+    # Fall back to the global security requirements.
+    return len(spec.get("security", [])) > 0
+
+
 def extract_tools_from_openapi(spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """Extract tools from OpenAPI spec with enhanced parameter and response documentation"""
     tools = {}
     paths = spec.get("paths", {})
-    
+
     for path, methods in paths.items():
         for method, operation in methods.items():
             method_upper = method.upper()
@@ -204,13 +221,14 @@ def extract_tools_from_openapi(spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]
                     "properties": props,
                     "required": required_params,
                 },
-                "responses": response_info
+                "responses": response_info,
+                "requires_auth": operation_requires_auth(spec, operation),
             }
-            
+
             # Add tags if available
             if "tags" in operation:
                 tool_info["tags"] = operation["tags"]
-            
+
             # Add security requirements if available
             if "security" in operation:
                 tool_info["security"] = operation["security"]

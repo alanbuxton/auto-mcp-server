@@ -18,7 +18,8 @@ import json
 import uvicorn
 
 from util.vars import (API_BASE_URL, API_TOKEN_PREFIX, AUTH_HEADER_NAME, 
-                       OPENAPI_SPEC_URL, MCP_SERVER_NAME, HTTP_MCP_SERVER_PORT)
+                       OPENAPI_SPEC_URL, MCP_SERVER_NAME, HTTP_MCP_SERVER_PORT,
+                       MCP_SERVER_DESCRIPTION)
 from util.shared import OpenAPISpec
 from util.log import logger
 
@@ -50,11 +51,26 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
     security_requirements = []
     
     if AUTH_HEADER_NAME:
-        security_schemes["apiToken"] = {
-            "type": "http",
-            "scheme": "bearer",
-            "description": f"API token authentication using {AUTH_HEADER_NAME} header with {API_TOKEN_PREFIX} prefix"
-        }
+        description = (
+            f"API token authentication using {AUTH_HEADER_NAME} header"
+            + (f" with {API_TOKEN_PREFIX} prefix" if API_TOKEN_PREFIX else "")
+        )
+        # OpenAPI's "http" type requires a registered HTTP auth scheme
+        # (RFC 7235). "Bearer" qualifies; any other prefix does not, so fall
+        # back to a header-based apiKey scheme.
+        if API_TOKEN_PREFIX.lower() == "bearer":
+            security_schemes["apiToken"] = {
+                "type": "http",
+                "scheme": "bearer",
+                "description": description,
+            }
+        else:
+            security_schemes["apiToken"] = {
+                "type": "apiKey",
+                "in": "header",
+                "name": AUTH_HEADER_NAME,
+                "description": description,
+            }
         security_requirements.append({"apiToken": []})
     
     # Add cookie auth if you're handling cookies
@@ -110,10 +126,15 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
                 }
             }
         
-        # Add security requirements for this tool
-        if security_requirements:
+        # Expose whether this tool requires authentication so clients can
+        # distinguish auth from no-auth tools.
+        requires_auth = tool_info.get("requires_auth", False)
+        tool_def["_meta"] = {"requiresAuth": requires_auth}
+
+        # Only advertise security requirements for tools that actually need them.
+        if requires_auth and security_requirements:
             tool_def["security"] = security_requirements
-            
+
         enhanced_tools.append(tool_def)
     
     discovery_doc = {
@@ -121,7 +142,7 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
         "server": {
             "name": MCP_SERVER_NAME,
             "version": "1.0.0",
-            "description": f"MCP server exposing tools from OpenAPI specification"
+            "description": MCP_SERVER_DESCRIPTION,
         },
         "capabilities": {
             "tools": {
@@ -200,7 +221,8 @@ def main(
             types.Tool(
                 name=tool_info["name"],
                 description=tool_info["description"],
-                inputSchema=tool_info["inputSchema"]
+                inputSchema=tool_info["inputSchema"],
+                _meta={"requiresAuth": tool_info.get("requires_auth", False)},
             )
             for tool_info in openapi_spec.tools_cache.values()
         ]

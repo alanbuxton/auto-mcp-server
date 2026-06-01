@@ -11,5 +11,10 @@ dependencies = [
     "mcp>=1.13.1",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
 [tool.uv]
 

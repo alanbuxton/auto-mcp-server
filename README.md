@@ -60,3 +60,12 @@ Connection info for MCP Inspector:
 - Anyone making calls that require authorization will need to add their API key in the Authentication section
 
 The Stateless Streaming MCP Server also serves an mcp.json at `.well-known/mcp.json` (in this example it would be `http://127.0.0.1/.well-known/mcp.json` )
+
+## Distinguishing tools that need auth
+
+Each tool is tagged with whether it requires authentication, derived from the OpenAPI `security` rules (an operation's `security` overrides the spec-level `security`, and an explicit empty `security: []` means no auth). This is exposed two ways:
+
+- In `tools/list`, each tool carries `_meta: { "requiresAuth": true | false }`.
+- In `.well-known/mcp.json`, the same `_meta` flag is present, and the `security` block is only attached to tools that actually require auth.
+
+Clients can use this to call public endpoints without prompting the user for a token, and only request credentials for tools that need them.

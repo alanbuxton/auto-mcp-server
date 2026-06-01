@@ -12,6 +12,7 @@ API_TOKEN_PREFIX = os.getenv("API_TOKEN_PREFIX", "")
 AUTH_HEADER_NAME = os.getenv("AUTH_HEADER_NAME", "Authorization")
 AUTH_HEADER = {AUTH_HEADER_NAME: f"{API_TOKEN_PREFIX} {MCP_SERVER_API_TOKEN}".strip()}
 
-MCP_SERVER_NAME = os.getenv("SERVER_TITLE", "My MCP Server")
+MCP_SERVER_NAME = os.getenv("MCP_SERVER_NAME", "My MCP Server")
+MCP_SERVER_DESCRIPTION = os.getenv("MCP_SERVER_DESCRIPTION", "My MCP Server Description")
 HTTP_MCP_SERVER_PORT = int(os.getenv("HTTP_MCP_SERVER_PORT", "9000"))
 ALLOWED_TOOLS = [x.strip() for x in os.getenv("ALLOWED_TOOLS","").split(",") if x.strip()]

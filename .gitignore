@@ -1,3 +1,5 @@
 .env
 pyrightconfig.json
 **/__pycache__
+.claude
+
