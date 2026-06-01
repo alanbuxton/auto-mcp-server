@@ -17,7 +17,7 @@ import requests
 import json
 import uvicorn
 
-from util.vars import (API_BASE_URL, API_TOKEN_PREFIX, AUTH_HEADER_NAME, 
+from util.vars import (API_BASE_URL, API_TOKEN_PREFIX, AUTH_HEADER_NAME,
                        OPENAPI_SPEC_URL, MCP_SERVER_NAME, HTTP_MCP_SERVER_PORT,
                        MCP_SERVER_DESCRIPTION)
 from util.shared import OpenAPISpec
@@ -138,10 +138,10 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
         enhanced_tools.append(tool_def)
     
     discovery_doc = {
-        "mcpVersion": "2024-11-05",
+        "mcpVersion": types.LATEST_PROTOCOL_VERSION,
         "server": {
             "name": MCP_SERVER_NAME,
-            "version": "1.0.0",
+            "version": openapi_spec.version,
             "description": MCP_SERVER_DESCRIPTION,
         },
         "capabilities": {
@@ -195,7 +195,7 @@ def main(
     openapi_spec: OpenAPISpec,
     port: int
 ) -> int:
-    app = Server(MCP_SERVER_NAME)
+    app = Server(MCP_SERVER_NAME, version=openapi_spec.version)
 
     @app.list_resources()
     async def list_resources() -> list[types.Resource]:

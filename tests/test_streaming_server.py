@@ -54,9 +54,9 @@ class TestPrepareAuthHeaders:
 # --------------------------------------------------------------------------- #
 # generate_mcp_discovery_document
 # --------------------------------------------------------------------------- #
-def _spec_with_tools(tools_cache):
+def _spec_with_tools(tools_cache, version="9.9.9"):
     """A lightweight stand-in for OpenAPISpec carrying a tools_cache."""
-    return types.SimpleNamespace(tools_cache=tools_cache)
+    return types.SimpleNamespace(tools_cache=tools_cache, version=version)
 
 
 @pytest.fixture
@@ -85,8 +85,10 @@ class TestGenerateDiscoveryDocument:
 
     def test_server_metadata_and_transport(self, base_env, monkeypatch):
         monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
-        doc = server.generate_mcp_discovery_document(_spec_with_tools({}))
+        doc = server.generate_mcp_discovery_document(_spec_with_tools({}, version="2.5.0"))
         assert doc["server"]["name"] == "Test Server"
+        assert doc["server"]["version"] == "2.5.0"
+        assert doc["mcpVersion"] == server.types.LATEST_PROTOCOL_VERSION
         assert doc["transport"]["baseUrl"] == "http://api.test/mcp"
         assert doc["transport"]["authentication"]["required"] is True
 

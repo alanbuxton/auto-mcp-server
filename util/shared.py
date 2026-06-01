@@ -12,6 +12,7 @@ class OpenAPISpec(ABC):
             resp.raise_for_status()
             self.raw_openapi_spec = resp.text
             self.openapi_spec = resp.json()
+            self.version = self.openapi_spec.get("info", {}).get("version", "0.0.0")
             self.tools_cache = extract_tools_from_openapi(self.openapi_spec)
             logger.info(f"Loaded OpenAPI spec and cached {len(self.tools_cache)} tools")
         except Exception as e:
