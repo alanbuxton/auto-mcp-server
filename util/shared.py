@@ -14,6 +14,7 @@ class OpenAPISpec(ABC):
             self.openapi_spec = resp.json()
             self.version = self.openapi_spec.get("info", {}).get("version", "0.0.0")
             self.cookie_auth = extract_cookie_auth_scheme(self.openapi_spec)
+            self.header_apikey_schemes = extract_header_apikey_schemes(self.openapi_spec)
             self.tools_cache = extract_tools_from_openapi(self.openapi_spec)
             logger.info(f"Loaded OpenAPI spec and cached {len(self.tools_cache)} tools")
         except Exception as e:
@@ -32,6 +33,20 @@ def extract_cookie_auth_scheme(spec: Dict[str, Any]) -> Dict[str, Any] | None:
         if scheme.get("type") == "apiKey" and scheme.get("in") == "cookie":
             return scheme
     return None
+
+
+def extract_header_apikey_schemes(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Return all header-based apiKey security schemes keyed by their OpenAPI
+    scheme name (``type: apiKey``, ``in: header``).  Used to populate the
+    discovery doc with any X-API-Key-style schemes the underlying API declares
+    beyond what the AUTH_HEADER_NAME env-var already covers.
+    """
+    schemes = spec.get("components", {}).get("securitySchemes", {})
+    return {
+        name: scheme
+        for name, scheme in schemes.items()
+        if scheme.get("type") == "apiKey" and scheme.get("in") == "header"
+    }
 
 
 def resolve_schema_ref(spec: Dict[str, Any], ref: str) -> Dict[str, Any]:

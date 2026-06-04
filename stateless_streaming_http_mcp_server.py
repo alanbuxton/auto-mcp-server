@@ -23,9 +23,9 @@ from util.vars import (API_BASE_URL, API_TOKEN_PREFIX, AUTH_HEADER_NAME,
 from util.shared import OpenAPISpec
 from util.log import logger
 
-def prepare_auth_headers(headers: Dict):
+def prepare_auth_headers(headers: Dict, extra_apikey_header_names: frozenset = frozenset()) -> Dict:
     new_headers = {}
-    # Forward Authorization header if present. Change the 
+    # Forward Authorization header if present. Change the
     auth_header = headers.get("authorization")
     if auth_header:
         vals = auth_header.strip().split(" ")
@@ -40,16 +40,62 @@ def prepare_auth_headers(headers: Dict):
     cookie_header = headers.get("cookie")
     if cookie_header:
         new_headers["Cookie"] = cookie_header
-    
+
+    # Forward any extra apiKey-in-header headers the spec advertises that are
+    # not already covered by the Authorization→AUTH_HEADER_NAME translation.
+    for name in extra_apikey_header_names:
+        value = headers.get(name.lower())
+        if value:
+            new_headers[name] = value
+
     return new_headers
+
+def _find_discovery_name(raw_scheme: dict, security_schemes: dict) -> str | None:
+    """Return the discovery-doc scheme name that corresponds to a raw OpenAPI
+    security scheme, or None if no match is found.
+
+    The tricky case: the OpenAPI spec may declare the Authorization-header
+    scheme as either ``type: http, scheme: bearer`` *or*
+    ``type: apiKey, in: header, name: Authorization``.  The discovery doc
+    always emits ``apiToken`` for whatever header AUTH_HEADER_NAME names, so
+    both OpenAPI representations must map to ``apiToken``.
+    """
+    scheme_type = raw_scheme.get("type", "")
+    scheme_in = raw_scheme.get("in", "")
+    scheme_name = raw_scheme.get("name", "").lower()
+
+    # http/bearer → the canonical Authorization-header token entry
+    if scheme_type == "http":
+        if "apiToken" in security_schemes:
+            return "apiToken"
+
+    if scheme_type == "apiKey":
+        if scheme_in == "header":
+            # apiKey-in-header using the same header as AUTH_HEADER_NAME
+            # (e.g. tokenAuth: apiKey/header/Authorization) → apiToken
+            if scheme_name == AUTH_HEADER_NAME.lower() and "apiToken" in security_schemes:
+                return "apiToken"
+            # Other named header schemes: match by header name
+            for disc_name, disc_scheme in security_schemes.items():
+                if (disc_scheme.get("type") == "apiKey"
+                        and disc_scheme.get("in") == "header"
+                        and disc_scheme.get("name", "").lower() == scheme_name):
+                    return disc_name
+        elif scheme_in == "cookie":
+            if "cookieAuth" in security_schemes:
+                return "cookieAuth"
+
+    return None
+
 
 def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
     """Generate the .well-known/mcp.json discovery document"""
-    
-    # Build security schemes from your authentication setup
+
     security_schemes = {}
-    security_requirements = []
-    
+    # Maps OpenAPI spec scheme names → discovery-doc scheme names so that
+    # per-operation security requirements can be translated faithfully.
+    openapi_to_discovery: dict[str, str] = {}
+
     if AUTH_HEADER_NAME:
         description = (
             f"API token authentication using {AUTH_HEADER_NAME} header"
@@ -71,8 +117,22 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
                 "name": AUTH_HEADER_NAME,
                 "description": description,
             }
-        security_requirements.append({"apiToken": []})
-    
+
+    # Add header-based apiKey schemes declared in the OpenAPI spec that are
+    # not already covered by the AUTH_HEADER_NAME env-var configuration.
+    covered_headers = {AUTH_HEADER_NAME.lower()} if AUTH_HEADER_NAME else set()
+    for scheme_name, scheme in openapi_spec.header_apikey_schemes.items():
+        header_name = scheme.get("name", "")
+        if header_name.lower() in covered_headers:
+            continue
+        security_schemes[scheme_name] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": header_name,
+            "description": scheme.get("description", f"API key via {header_name} header"),
+        }
+        covered_headers.add(header_name.lower())
+
     # Advertise cookie auth only if the OpenAPI spec declares a cookie-based
     # scheme; the cookie name is taken from the spec rather than hard-coded.
     if openapi_spec.cookie_auth:
@@ -82,7 +142,28 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
             "name": openapi_spec.cookie_auth.get("name", "session"),
             "description": "Cookie-based authentication"
         }
-    
+
+    # Build a mapping from raw OpenAPI scheme names to discovery-doc names so
+    # that per-operation security requirements can be translated faithfully.
+    raw_schemes = openapi_spec.openapi_spec.get("components", {}).get("securitySchemes", {})
+    for raw_name, raw_scheme in raw_schemes.items():
+        disc_name = _find_discovery_name(raw_scheme, security_schemes)
+        if disc_name:
+            openapi_to_discovery[raw_name] = disc_name
+
+    # Derive top-level security requirements from the spec's global security
+    # field (translated to discovery names). Fall back to requiring every
+    # advertised scheme when the spec has no global security declaration.
+    raw_top_security = openapi_spec.openapi_spec.get("security", [])
+    if raw_top_security:
+        security_requirements = [
+            {openapi_to_discovery[k]: v for k, v in req.items() if k in openapi_to_discovery}
+            for req in raw_top_security
+        ]
+        security_requirements = [r for r in security_requirements if r]
+    else:
+        security_requirements = [{name: []} for name in security_schemes]
+
     # Build enhanced tools with response schemas
     enhanced_tools = []
     for tool_info in openapi_spec.tools_cache.values():
@@ -91,7 +172,7 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
             "description": tool_info["description"],
             "inputSchema": tool_info["inputSchema"]
         }
-        
+
         # Add response schema if available from OpenAPI spec
         if "responses" in tool_info:
             tool_def["responses"] = tool_info["responses"]
@@ -127,15 +208,26 @@ def generate_mcp_discovery_document(openapi_spec: OpenAPISpec) -> dict:
                     }
                 }
             }
-        
+
         # Expose whether this tool requires authentication so clients can
         # distinguish auth from no-auth tools.
         requires_auth = tool_info.get("requires_auth", False)
         tool_def["_meta"] = {"requiresAuth": requires_auth}
 
         # Only advertise security requirements for tools that actually need them.
+        # Translate the tool's raw OpenAPI security to discovery-doc scheme names;
+        # fall back to the top-level requirements when the tool has none.
         if requires_auth and security_requirements:
-            tool_def["security"] = security_requirements
+            raw_tool_security = tool_info.get("security")
+            if raw_tool_security is not None:
+                tool_security = [
+                    {openapi_to_discovery[k]: v for k, v in req.items() if k in openapi_to_discovery}
+                    for req in raw_tool_security
+                ]
+                tool_security = [r for r in tool_security if r]
+                tool_def["security"] = tool_security or security_requirements
+            else:
+                tool_def["security"] = security_requirements
 
         enhanced_tools.append(tool_def)
     
@@ -256,7 +348,12 @@ def main(
         url = API_BASE_URL.rstrip("/") + endpoint
 
         request = app.request_context.request
-        headers = prepare_auth_headers(request.headers)
+        extra_apikey_header_names = frozenset(
+            s.get("name", "")
+            for s in openapi_spec.header_apikey_schemes.values()
+            if s.get("name", "").lower() != AUTH_HEADER_NAME.lower()
+        )
+        headers = prepare_auth_headers(request.headers, extra_apikey_header_names)
 
         logger.info(f"Making {tool_data['method']} request to {url}")
 

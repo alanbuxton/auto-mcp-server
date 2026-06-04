@@ -54,10 +54,20 @@ class TestPrepareAuthHeaders:
 # --------------------------------------------------------------------------- #
 # generate_mcp_discovery_document
 # --------------------------------------------------------------------------- #
-def _spec_with_tools(tools_cache, version="9.9.9", cookie_auth=None):
+def _spec_with_tools(
+    tools_cache,
+    version="9.9.9",
+    cookie_auth=None,
+    header_apikey_schemes=None,
+    openapi_spec=None,
+):
     """A lightweight stand-in for OpenAPISpec carrying a tools_cache."""
     return types.SimpleNamespace(
-        tools_cache=tools_cache, version=version, cookie_auth=cookie_auth
+        tools_cache=tools_cache,
+        version=version,
+        cookie_auth=cookie_auth,
+        header_apikey_schemes=header_apikey_schemes or {},
+        openapi_spec=openapi_spec or {"components": {"securitySchemes": {}}, "security": []},
     )
 
 
@@ -189,3 +199,163 @@ class TestGenerateDiscoveryDocument:
         doc = server.generate_mcp_discovery_document(_spec_with_tools(tools_cache))
         responses = doc["tools"][0]["responses"]
         assert "200" in responses and "error" in responses
+
+    def test_extra_header_apikey_scheme_from_spec_is_advertised(self, base_env, monkeypatch):
+        """An X-API-Key-style scheme in the OpenAPI spec must appear in the
+        discovery doc alongside the env-var-configured apiToken scheme."""
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "Authorization")
+        header_apikey_schemes = {
+            "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key", "description": "API key"}
+        }
+        doc = server.generate_mcp_discovery_document(
+            _spec_with_tools({}, header_apikey_schemes=header_apikey_schemes)
+        )
+        schemes = doc["components"]["securitySchemes"]
+        assert "xApiKey" in schemes
+        assert schemes["xApiKey"]["type"] == "apiKey"
+        assert schemes["xApiKey"]["in"] == "header"
+        assert schemes["xApiKey"]["name"] == "X-API-Key"
+        assert "xApiKey" in doc["transport"]["authentication"]["methods"]
+
+    def test_header_scheme_covered_by_auth_header_name_not_duplicated(self, base_env, monkeypatch):
+        """If AUTH_HEADER_NAME already names the same header as an OpenAPI apiKey
+        scheme, the scheme must not appear twice in the discovery doc."""
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Token")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "X-API-Key")
+        header_apikey_schemes = {
+            "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+        }
+        doc = server.generate_mcp_discovery_document(
+            _spec_with_tools({}, header_apikey_schemes=header_apikey_schemes)
+        )
+        schemes = doc["components"]["securitySchemes"]
+        assert "apiToken" in schemes
+        assert "xApiKey" not in schemes
+
+    def test_per_tool_security_translated_from_openapi_scheme_names(self, base_env, monkeypatch):
+        """Per-tool security must use discovery-doc names, not raw OpenAPI names.
+        Also verifies that an apiKey/header/Authorization scheme (tokenAuth) is
+        correctly mapped to apiToken even when apiToken is declared as http/bearer."""
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "Authorization")
+
+        raw_spec = {
+            "components": {
+                "securitySchemes": {
+                    "bearerAuth": {"type": "http", "scheme": "bearer"},
+                    "tokenAuth": {"type": "apiKey", "in": "header", "name": "Authorization"},
+                    "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                    "cookieAuth": {"type": "apiKey", "in": "cookie", "name": "sessionid"},
+                }
+            },
+            "security": [],
+        }
+        header_apikey_schemes = {
+            "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+        }
+        cookie_auth = {"type": "apiKey", "in": "cookie", "name": "sessionid"}
+        tools_cache = {
+            "bearer_tool": {
+                "name": "bearer_tool",
+                "description": "needs bearer",
+                "inputSchema": {"type": "object", "properties": {}},
+                "requires_auth": True,
+                "security": [{"bearerAuth": []}],
+            },
+            "token_tool": {
+                "name": "token_tool",
+                "description": "needs tokenAuth (apiKey/Authorization header)",
+                "inputSchema": {"type": "object", "properties": {}},
+                "requires_auth": True,
+                "security": [{"tokenAuth": []}],
+            },
+            "apikey_tool": {
+                "name": "apikey_tool",
+                "description": "needs x-api-key",
+                "inputSchema": {"type": "object", "properties": {}},
+                "requires_auth": True,
+                "security": [{"xApiKey": []}],
+            },
+            "multi_auth_tool": {
+                "name": "multi_auth_tool",
+                "description": "accepts cookie, tokenAuth, or apiKey",
+                "inputSchema": {"type": "object", "properties": {}},
+                "requires_auth": True,
+                "security": [{"cookieAuth": []}, {"tokenAuth": []}, {"xApiKey": []}],
+            },
+        }
+        doc = server.generate_mcp_discovery_document(
+            _spec_with_tools(
+                tools_cache,
+                cookie_auth=cookie_auth,
+                header_apikey_schemes=header_apikey_schemes,
+                openapi_spec=raw_spec,
+            )
+        )
+        tools_by_name = {t["name"]: t for t in doc["tools"]}
+        assert tools_by_name["bearer_tool"]["security"] == [{"apiToken": []}]
+        assert tools_by_name["token_tool"]["security"] == [{"apiToken": []}]
+        assert tools_by_name["apikey_tool"]["security"] == [{"xApiKey": []}]
+        assert tools_by_name["multi_auth_tool"]["security"] == [
+            {"cookieAuth": []}, {"apiToken": []}, {"xApiKey": []}
+        ]
+
+    def test_security_requirements_derived_from_spec_global_security(self, base_env, monkeypatch):
+        """When the OpenAPI spec declares global security, the discovery doc's
+        top-level security must reflect it (translated to discovery names)."""
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "Authorization")
+
+        raw_spec = {
+            "components": {
+                "securitySchemes": {
+                    "bearerAuth": {"type": "http", "scheme": "bearer"},
+                    "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                }
+            },
+            "security": [{"bearerAuth": []}, {"xApiKey": []}],
+        }
+        header_apikey_schemes = {
+            "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+        }
+        doc = server.generate_mcp_discovery_document(
+            _spec_with_tools({}, header_apikey_schemes=header_apikey_schemes, openapi_spec=raw_spec)
+        )
+        assert {"apiToken": []} in doc["security"]
+        assert {"xApiKey": []} in doc["security"]
+
+
+# --------------------------------------------------------------------------- #
+# prepare_auth_headers — extra apiKey header forwarding
+# --------------------------------------------------------------------------- #
+class TestPrepareAuthHeadersExtraHeaders:
+    def test_forwards_extra_apikey_header(self, monkeypatch):
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "Authorization")
+        result = server.prepare_auth_headers(
+            {"x-api-key": "my-key"},
+            frozenset(["X-API-Key"]),
+        )
+        assert result == {"X-API-Key": "my-key"}
+
+    def test_does_not_forward_unknown_headers(self, monkeypatch):
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "Bearer")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "Authorization")
+        result = server.prepare_auth_headers(
+            {"x-custom": "value"},
+            frozenset(["X-API-Key"]),
+        )
+        assert "x-custom" not in result
+        assert "X-API-Key" not in result
+
+    def test_extra_headers_combined_with_auth_and_cookie(self, monkeypatch):
+        monkeypatch.setattr(server, "API_TOKEN_PREFIX", "")
+        monkeypatch.setattr(server, "AUTH_HEADER_NAME", "Authorization")
+        result = server.prepare_auth_headers(
+            {"authorization": "Bearer tok", "cookie": "s=1", "x-api-key": "k"},
+            frozenset(["X-API-Key"]),
+        )
+        assert result["Authorization"] == "Bearer tok"
+        assert result["Cookie"] == "s=1"
+        assert result["X-API-Key"] == "k"

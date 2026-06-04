@@ -9,6 +9,7 @@ from util.shared import (
     extract_response_info,
     operation_requires_auth,
     extract_tools_from_openapi,
+    extract_header_apikey_schemes,
 )
 
 
@@ -273,6 +274,66 @@ class TestExtractToolsFromOpenapi:
         tools = extract_tools_from_openapi(spec)
         assert tools["secure"]["requires_auth"] is True
         assert tools["open"]["requires_auth"] is False
+
+
+# --------------------------------------------------------------------------- #
+# extract_header_apikey_schemes
+# --------------------------------------------------------------------------- #
+class TestExtractHeaderApiKeySchemes:
+    def test_returns_header_apikey_scheme(self):
+        spec = {
+            "components": {
+                "securitySchemes": {
+                    "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+                }
+            }
+        }
+        result = extract_header_apikey_schemes(spec)
+        assert "xApiKey" in result
+        assert result["xApiKey"]["name"] == "X-API-Key"
+
+    def test_excludes_cookie_schemes(self):
+        spec = {
+            "components": {
+                "securitySchemes": {
+                    "cookieAuth": {"type": "apiKey", "in": "cookie", "name": "session"},
+                    "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                }
+            }
+        }
+        result = extract_header_apikey_schemes(spec)
+        assert "xApiKey" in result
+        assert "cookieAuth" not in result
+
+    def test_excludes_http_bearer_scheme(self):
+        spec = {
+            "components": {
+                "securitySchemes": {
+                    "bearerAuth": {"type": "http", "scheme": "bearer"},
+                    "xApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                }
+            }
+        }
+        result = extract_header_apikey_schemes(spec)
+        assert "xApiKey" in result
+        assert "bearerAuth" not in result
+
+    def test_returns_empty_when_no_schemes(self):
+        assert extract_header_apikey_schemes({}) == {}
+        assert extract_header_apikey_schemes({"components": {}}) == {}
+
+    def test_returns_multiple_header_schemes(self):
+        spec = {
+            "components": {
+                "securitySchemes": {
+                    "key1": {"type": "apiKey", "in": "header", "name": "X-Key-1"},
+                    "key2": {"type": "apiKey", "in": "header", "name": "X-Key-2"},
+                }
+            }
+        }
+        result = extract_header_apikey_schemes(spec)
+        assert set(result) == {"key1", "key2"}
+
 
     def test_allowlist_filters_tools(self, monkeypatch):
         monkeypatch.setattr(shared, "ALLOWED_TOOLS", ["listPets"])
